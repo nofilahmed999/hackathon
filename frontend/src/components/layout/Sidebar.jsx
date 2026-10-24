@@ -23,6 +23,7 @@ export default function Sidebar({ mobileOpen, onCloseMobile, onOpenAI }) {
     { name: "Dashboard", to: "/admin/dashboard", icon: LayoutDashboard },
     { name: "Company Settings", to: "/admin/company", icon: Building2 },
     { name: "HR Management", to: "/admin/hr", icon: UserCheck },
+    { name: "Admin Provisioning", to: "/bootstrap", icon: UserCheck },
     { name: "Employees", to: "/admin/employees", icon: Users },
     { name: "Departments", to: "/admin/departments", icon: FolderTree },
     { name: "Attendance Records", to: "/admin/attendance", icon: CalendarCheck },

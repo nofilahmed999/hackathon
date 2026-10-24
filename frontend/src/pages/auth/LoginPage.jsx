@@ -54,12 +54,8 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen bg-[#F9F7F7] flex flex-col justify-center py-12 sm:px-6 lg:px-8">
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
-        <div className="flex justify-center">
-          <div className="px-6 py-2.5 rounded-xl bg-[#112D4E] flex items-center justify-center font-bold text-white text-lg tracking-widest border border-[#3F72AF]/50">
-            HCM
-          </div>
-        </div>
-        <h2 className="mt-4 text-center text-2xl font-bold tracking-tight text-[#112D4E]">
+        
+        <h2 className="mt-4  text-center text-2xl font-bold tracking-tight text-[#112D4E]">
           HCM Lite
         </h2>
         <p className="mt-1 text-center text-xs text-[#112D4E]/70 font-medium">
