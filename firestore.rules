@@ -1,0 +1,247 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===== Helper Functions =====
+
+    // Check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Get user document
+    function getUserDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    // Check if user belongs to a specific company
+    function belongsToCompany(companyId) {
+      return isAuthenticated() && getUserDoc().companyId == companyId;
+    }
+
+    // Check user role
+    function hasRole(role) {
+      return isAuthenticated() && getUserDoc().role == role;
+    }
+
+    // Check if user has any of the specified roles
+    function hasAnyRole(roles) {
+      return isAuthenticated() && getUserDoc().role in roles;
+    }
+
+    // Check if user is admin of the company
+    function isCompanyAdmin(companyId) {
+      let user = getUserDoc();
+      return user.companyId == companyId && user.role == 'admin';
+    }
+
+    // Check if user is admin or HR of the company
+    function isCompanyAdminOrHR(companyId) {
+      let user = getUserDoc();
+      return user.companyId == companyId && user.role in ['admin', 'hr'];
+    }
+
+    // ===== Collection Rules =====
+
+    // Companies - admin can read/write their own company
+    match /companies/{companyId} {
+      allow read: if belongsToCompany(companyId);
+      allow create: if isAuthenticated(); // Bootstrap creates company
+      allow update: if isCompanyAdmin(companyId);
+      allow delete: if false; // Never delete companies
+    }
+
+    // Users - users can read their own doc, admin/HR can read company users
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (
+        request.auth.uid == userId ||
+        (getUserDoc().companyId == resource.data.companyId &&
+         getUserDoc().role in ['admin', 'hr'])
+      );
+      allow create: if isAuthenticated(); // Admin SDK handles creation
+      allow update: if isAuthenticated() && (
+        request.auth.uid == userId || // Self-update (limited fields)
+        isCompanyAdminOrHR(resource.data.companyId)
+      );
+      allow delete: if false;
+    }
+
+    // Employees - company isolation enforced
+    match /employees/{employeeId} {
+      allow read: if isAuthenticated() && (
+        belongsToCompany(resource.data.companyId) &&
+        (getUserDoc().role in ['admin', 'hr'] || getUserDoc().employeeId == employeeId || resource.data.userId == request.auth.uid)
+      );
+      allow create: if isAuthenticated() && isCompanyAdminOrHR(request.resource.data.companyId);
+      allow update: if isAuthenticated() && isCompanyAdminOrHR(resource.data.companyId);
+      allow delete: if false;
+    }
+
+    // Departments
+    match /departments/{deptId} {
+      allow read: if isAuthenticated() && belongsToCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && isCompanyAdminOrHR(request.resource.data.companyId);
+      allow update: if isAuthenticated() && isCompanyAdminOrHR(resource.data.companyId);
+      allow delete: if isAuthenticated() && isCompanyAdmin(resource.data.companyId);
+    }
+
+    // Designations
+    match /designations/{desigId} {
+      allow read: if isAuthenticated() && belongsToCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && isCompanyAdminOrHR(request.resource.data.companyId);
+      allow update: if isAuthenticated() && isCompanyAdminOrHR(resource.data.companyId);
+      allow delete: if isAuthenticated() && isCompanyAdmin(resource.data.companyId);
+    }
+
+    // Attendance
+    match /attendance/{attendanceId} {
+      allow read: if isAuthenticated() && (
+        belongsToCompany(resource.data.companyId) ||
+        resource.data.userId == request.auth.uid
+      );
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && (
+        isCompanyAdminOrHR(resource.data.companyId) ||
+        resource.data.userId == request.auth.uid
+      );
+      allow delete: if false;
+    }
+
+    // Biometric Face Templates
+    match /biometric_templates/{userId} {
+      allow read: if isAuthenticated() && (
+        request.auth.uid == userId ||
+        isCompanyAdminOrHR(resource.data.companyId)
+      );
+      allow create, update: if isAuthenticated() && request.auth.uid == userId;
+      allow delete: if isAuthenticated() && (
+        request.auth.uid == userId ||
+        isCompanyAdmin(resource.data.companyId)
+      );
+    }
+
+    // Attendance Corrections
+    match /attendance_corrections/{correctionId} {
+      allow read: if isAuthenticated() && belongsToCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && belongsToCompany(request.resource.data.companyId);
+      allow update: if isAuthenticated() && isCompanyAdminOrHR(resource.data.companyId);
+      allow delete: if false;
+    }
+
+    // Leave Types
+    match /leave_types/{typeId} {
+      allow read: if isAuthenticated() && belongsToCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && isCompanyAdmin(request.resource.data.companyId);
+      allow update: if isAuthenticated() && isCompanyAdmin(resource.data.companyId);
+      allow delete: if isAuthenticated() && isCompanyAdmin(resource.data.companyId);
+    }
+
+    // Leave Balances
+    match /leave_balances/{balanceId} {
+      allow read: if isAuthenticated() && belongsToCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && isCompanyAdminOrHR(request.resource.data.companyId);
+      allow update: if isAuthenticated() && isCompanyAdminOrHR(resource.data.companyId);
+      allow delete: if false;
+    }
+
+    // Leave Requests
+    match /leave_requests/{requestId} {
+      allow read: if isAuthenticated() && belongsToCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && belongsToCompany(request.resource.data.companyId);
+      allow update: if isAuthenticated() && (
+        // Employee can cancel own pending request
+        (resource.data.employeeId == getUserDoc().employeeId && resource.data.status == 'pending') ||
+        // Admin/HR can approve/reject
+        isCompanyAdminOrHR(resource.data.companyId)
+      );
+      allow delete: if false;
+    }
+
+    // Public Holidays
+    match /public_holidays/{holidayId} {
+      allow read: if isAuthenticated() && belongsToCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && isCompanyAdmin(request.resource.data.companyId);
+      allow update: if isAuthenticated() && isCompanyAdmin(resource.data.companyId);
+      allow delete: if isAuthenticated() && isCompanyAdmin(resource.data.companyId);
+    }
+
+    // Salary Structures
+    match /salary_structures/{structureId} {
+      allow read: if isAuthenticated() && (
+        belongsToCompany(resource.data.companyId) &&
+        (getUserDoc().role in ['admin', 'hr'] || getUserDoc().employeeId == resource.data.employeeId)
+      );
+      allow create: if isAuthenticated() && isCompanyAdminOrHR(request.resource.data.companyId);
+      allow update: if isAuthenticated() && isCompanyAdminOrHR(resource.data.companyId);
+      allow delete: if false;
+    }
+
+    // Payroll Runs
+    match /payroll_runs/{runId} {
+      allow read: if isAuthenticated() && isCompanyAdminOrHR(resource.data.companyId);
+      allow create: if isAuthenticated() && isCompanyAdminOrHR(request.resource.data.companyId);
+      allow update: if isAuthenticated() && isCompanyAdminOrHR(resource.data.companyId);
+      allow delete: if false;
+    }
+
+    // Payroll Line Items
+    match /payroll_line_items/{itemId} {
+      allow read: if isAuthenticated() && (
+        belongsToCompany(resource.data.companyId) &&
+        (getUserDoc().role in ['admin', 'hr'] || getUserDoc().employeeId == resource.data.employeeId)
+      );
+      allow create: if isAuthenticated() && isCompanyAdminOrHR(request.resource.data.companyId);
+      allow update: if false; // Payroll items are immutable
+      allow delete: if false;
+    }
+
+    // Announcements
+    match /announcements/{announcementId} {
+      allow read: if isAuthenticated() && belongsToCompany(resource.data.companyId);
+      allow create: if isAuthenticated() && isCompanyAdminOrHR(request.resource.data.companyId);
+      allow update: if isAuthenticated() && isCompanyAdminOrHR(resource.data.companyId);
+      allow delete: if isAuthenticated() && isCompanyAdminOrHR(resource.data.companyId);
+    }
+
+    // Notifications
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated(); // System creates notifications
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow delete: if false;
+    }
+
+    // Activity Logs - admin and HR read-only, authenticated create
+    match /activity_logs/{logId} {
+      allow read: if isAuthenticated() && (
+        isCompanyAdminOrHR(resource.data.companyId) ||
+        belongsToCompany(resource.data.companyId)
+      );
+      allow create: if isAuthenticated();
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // Audit Logs - admin read-only
+    match /audit_logs/{logId} {
+      allow read: if isAuthenticated() && isCompanyAdmin(resource.data.companyId);
+      allow create: if isAuthenticated(); // System creates audit logs
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // AI Request Logs
+    match /ai_request_logs/{logId} {
+      allow read: if isAuthenticated() && isCompanyAdmin(resource.data.companyId);
+      allow create: if isAuthenticated() && belongsToCompany(request.resource.data.companyId);
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // Deny all other access by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
